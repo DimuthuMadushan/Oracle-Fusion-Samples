@@ -27,8 +27,13 @@ configurable string schedulerServiceUrl = ?;
 configurable string username = ?;
 configurable string password = ?;
 
-# Path to the FBDI zip to upload. Keep it small - the API carries it as base64 in the JSON body.
-configurable string filePath = ?;
+# Directory holding the FBDI CSV files to upload, or a single file. Packed into `zipFilePath` at
+# the start of the run. Keep it small - the API carries the archive as base64 in the JSON body.
+configurable string dataDirPath = ?;
+
+# Where the archive is written. Must be outside `dataDirPath`, because an archive cannot contain
+# itself. Overwritten on every run.
+configurable string zipFilePath = "./APInvoiceImport.zip";
 
 # Name the file is stored under in WebCenter Content.
 configurable string fileName = "APInvoiceImport.zip";
