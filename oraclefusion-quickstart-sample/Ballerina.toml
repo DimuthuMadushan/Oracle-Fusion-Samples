@@ -1,0 +1,25 @@
+[package]
+org = "wso2"
+name = "oraclefusion_quickstart_sample"
+version = "0.1.0"
+distribution = "2201.12.0"
+
+[build-options]
+observabilityIncluded = true
+
+# Both connectors are resolved from the local Ballerina repository, because they are not
+# published to Ballerina Central yet. Run `./setup-local-repo.sh` once to pack and push them.
+#
+# Once the connectors are on Ballerina Central, delete both blocks below - the imports then
+# resolve from Central with no further changes.
+# [[dependency]]
+# org = "ballerinax"
+# name = "oraclefusion.erp.integrations"
+# version = "0.1.0"
+# repository = "local"
+
+# [[dependency]]
+# org = "ballerinax"
+# name = "oraclefusion.common.scheduler"
+# version = "0.1.0"
+# repository = "local"
