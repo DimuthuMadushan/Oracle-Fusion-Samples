@@ -51,7 +51,8 @@ function prepareArchive() returns string|error {
 # Needs `documentAccount`, and `jobPackageName`, `jobDefName` and `essParameters` for the job.
 #
 # + documentContent - The archive, base64-encoded
-function runUploadOperations(string documentContent) {
+# + return - error or nil
+function runUploadOperations(string documentContent) returns error? {
     io:println("\n=== Upload and submit ===");
 
     // 1. Stage the file in WebCenter Content, without submitting a job.
@@ -60,7 +61,7 @@ function runUploadOperations(string documentContent) {
         documentAccount,
         contentType: "zip",
         fileName
-    });
+    }, {"Content-Type": "application/json", "Accept": "application/json"});
     printOutcome("uploadFileToUcm", uploadResult);
 
     // 2. Submit an ESS job over the document the upload returned.
@@ -71,7 +72,7 @@ function runUploadOperations(string documentContent) {
             jobDefName,
             documentId,
             essParameters
-        });
+        }, {"Content-Type": "application/json", "Accept": "application/json"});
         printOutcome("submitEssJobRequest", essResult);
     } else {
         io:println("submitEssJobRequest -> skipped: uploadFileToUcm returned no documentId");
@@ -84,7 +85,8 @@ function runUploadOperations(string documentContent) {
 # Needs `documentAccount`, and `jobName` and `parameterList` for the job.
 #
 # + documentContent - The archive, base64-encoded
-function runImportOperations(string documentContent) {
+# + return - error or nil
+function runImportOperations(string documentContent) returns error? {
     io:println("\n=== Bulk import ===");
 
     // 1. Upload and submit in one operation instead of two.
@@ -95,13 +97,14 @@ function runImportOperations(string documentContent) {
         documentAccount,
         jobName,
         parameterList
-    });
+    }, {"Content-Type": "application/json", "Accept": "application/json"});
     printOutcome("importBulkData", importResult);
 
     // 2. Read the status of the job the import submitted.
     string? essRequestId = importResult is integrations:ErpIntegrationResponse ? importResult?.reqstId : ();
     if essRequestId is string {
-        integrations:EssJobStatusResponse|error statusResult = erpClient->getEssJobStatus(essRequestId);
+        integrations:EssJobStatusResponse|error statusResult = erpClient->getEssJobStatus(
+            essRequestId, {"Content-Type": "application/json", "Accept": "application/json"});
         printOutcome("getEssJobStatus", statusResult);
     } else {
         io:println("getEssJobStatus -> skipped: importBulkData returned no reqstId");
@@ -114,24 +117,27 @@ function runImportOperations(string documentContent) {
 # Off by default because, unlike the ERP calls, `submitJobRequest` starts a scheduled process on the
 # instance - which needs a `jobDefinitionId` that is safe to run there, and is not something every
 # instance the sample is pointed at has.
-function runSchedulerOperations() {
+# + return - error or nil
+function runSchedulerOperations() returns error? {
     io:println("\n=== Scheduler ===");
 
     // 1. List the scheduled process requests on the instance.
-    scheduler:RequestQueryResponse|error queryResult = schedulerClient->queryJobRequests();
+    scheduler:RequestQueryResponse|error queryResult = schedulerClient->queryJobRequests(
+        {"Content-Type": "application/json", "Accept": "application/json"});
     printOutcome("queryJobRequests", queryResult);
 
     // 2. Submit a scheduled process.
     scheduler:SubmitRequestResponse|error submitResult = schedulerClient->submitJobRequest({
         jobDefinitionId,
         description: "Ballerina connector quickstart"
-    });
+    }, {"Content-Type": "application/json", "Accept": "application/json"});
     printOutcome("submitJobRequest", submitResult);
 
     // 3. Read the request the submission created.
     int? requestId = submitResult is scheduler:SubmitRequestResponse ? submitResult.id : ();
     if requestId is int {
-        scheduler:RequestDetails|error detailsResult = schedulerClient->getJobRequest(requestId);
+        scheduler:RequestDetails|error detailsResult = schedulerClient->getJobRequest(
+            requestId, {"Content-Type": "application/json", "Accept": "application/json"});
         printOutcome("getJobRequest", detailsResult);
     } else {
         io:println("getJobRequest -> skipped: submitJobRequest returned no request id");

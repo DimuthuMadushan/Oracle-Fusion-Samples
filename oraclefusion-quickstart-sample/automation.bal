@@ -52,13 +52,13 @@ public function main() returns error? {
         string documentContent = check prepareArchive();
 
         if enableUploadOperations {
-            runUploadOperations(documentContent);
+            check runUploadOperations(documentContent);
         } else {
             io:println("\n=== Upload and submit === skipped: enableUploadOperations is false");
         }
 
         if enableImportOperations {
-            runImportOperations(documentContent);
+            check runImportOperations(documentContent);
         } else {
             io:println("\n=== Bulk import === skipped: enableImportOperations is false");
         }
@@ -67,7 +67,7 @@ public function main() returns error? {
     }
 
     if enableSchedulerOperations {
-        runSchedulerOperations();
+        check runSchedulerOperations();
     } else {
         io:println("\n=== Scheduler === skipped: enableSchedulerOperations is false");
     }
