@@ -15,10 +15,10 @@
 // under the License.
 
 import ballerinax/oraclefusion.common.scheduler;
-import ballerinax/oraclefusion.erp.integrations as erp;
+import ballerinax/oraclefusion.erp.integrations;
 
 // The ERP Integrations API carries the file as base64 inside the JSON body, so uploads need more
 // than the connector's 60 second default.
-final erp:Client erpClient = check new ({auth: {username, password}, timeout: 180}, erpServiceUrl);
+final integrations:Client erpClient = check new ({auth: {username, password}, timeout: 180}, erpServiceUrl);
 
 final scheduler:Client schedulerClient = check new ({auth: {username, password}}, schedulerServiceUrl);

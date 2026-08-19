@@ -6,10 +6,17 @@ One call to every operation both Oracle Fusion connectors expose, printing whate
 the response payload, or the error. Nothing is asserted, nothing is retried, and no report is
 written. This is the smallest thing that shows both connectors working against a live instance.
 
-| Connector | Operations called |
-| :--- | :--- |
-| `ballerinax/oraclefusion.erp.integrations` | `uploadFileToUcm`, `submitEssJobRequest`, `importBulkData`, `getEssJobStatus` |
-| `ballerinax/oraclefusion.common.scheduler` | `queryJobRequests`, `submitJobRequest`, `getJobRequest` |
+The run is split into three phases, each switched on its own in `Config.toml`, so a phase an
+instance does not permit — or that is simply not the one being investigated — can be left out:
+
+| Phase | Config key | Connector | Operations called |
+| :--- | :--- | :--- | :--- |
+| Upload and submit | `enableUploadOperations` | `oraclefusion.erp.integrations` | `uploadFileToUcm`, `submitEssJobRequest` |
+| Bulk import | `enableImportOperations` | `oraclefusion.erp.integrations` | `importBulkData`, `getEssJobStatus` |
+| Scheduler | `enableSchedulerOperations` | `oraclefusion.common.scheduler` | `queryJobRequests`, `submitJobRequest`, `getJobRequest` |
+
+The two ERP phases are on by default and the scheduler phase is off. A phase that is off reads none
+of its own configuration, so only the keys the enabled phases need have to be filled in.
 
 The archive the two uploads carry is built by the run itself, with
 [`ballerina/zip`](https://central.ballerina.io/ballerina/zip), from the FBDI CSV files on disk — so
@@ -40,9 +47,12 @@ Edit `Config.toml`. It holds only the values the seven calls cannot work without
 | `zipFilePath` | Where the archive is written. Must be outside `dataDirPath` |
 | `fileName` | The name UCM files the archive under |
 | `documentAccount` | Interface-specific UCM account, e.g. `fin$/payables$/import$` |
-| `jobName`, `parameterList` | The `importBulkData` job and its positional parameters |
-| `jobPackageName`, `jobDefName`, `essParameters` | The same job as `submitEssJobRequest` addresses it |
-| `jobDefinitionId` | The scheduled process `submitJobRequest` submits |
+| `enableUploadOperations` | Run the upload-and-submit phase. `true` by default |
+| `enableImportOperations` | Run the bulk-import phase. `true` by default |
+| `enableSchedulerOperations` | Run the scheduler phase. `false` by default |
+| `jobPackageName`, `jobDefName`, `essParameters` | The `submitEssJobRequest` job — upload phase only |
+| `jobName`, `parameterList` | The `importBulkData` job and its positional parameters — import phase only |
+| `jobDefinitionId` | The scheduled process `submitJobRequest` submits — scheduler phase only |
 
 `Config.toml` is git-ignored. To keep credentials outside the working tree, put them elsewhere and
 point Ballerina at the file:
@@ -50,6 +60,14 @@ point Ballerina at the file:
 ```bash
 BAL_CONFIG_FILES=/secure/path/oracle-quickstart.toml bal run
 ```
+
+Both service URLs and the credentials are always needed, because both clients are created at
+startup. Everything else is read only by the phase that uses it, so the keys of a disabled phase can
+be left empty.
+
+The scheduler phase is off by default: unlike the ERP calls, `submitJobRequest` starts a scheduled
+process on the pod rather than only reading from it. Set `enableSchedulerOperations = true` with a
+`jobDefinitionId` that is safe to run there to include it.
 
 Everything else each operation accepts is either optional, or taken from an earlier response — see
 [How It Works](#how-it-works).
@@ -64,24 +82,28 @@ bal run
 
 ## How It Works
 
-The calls run in dependency order, and the ids the later ones need come from the earlier responses
-rather than from configuration:
+Within each phase the calls run in dependency order, and the ids the later ones need come from the
+earlier responses rather than from configuration — which is why each pair stays together in one
+phase:
 
-| # | Call | Input that comes from an earlier call |
-| ---: | :--- | :--- |
-| 0 | `zip:compress` | — |
-| 1 | `uploadFileToUcm` | the archive from step 0 |
-| 2 | `submitEssJobRequest` | `documentId` from call 1 |
-| 3 | `importBulkData` | — |
-| 4 | `getEssJobStatus` | `reqstId` from call 3 |
-| 5 | `queryJobRequests` | — |
-| 6 | `submitJobRequest` | — |
-| 7 | `getJobRequest` | request id from call 6 |
+| Phase | # | Call | Input that comes from an earlier call |
+| :--- | ---: | :--- | :--- |
+| — | 0 | `zip:compress` | — |
+| Upload and submit | 1 | `uploadFileToUcm` | the archive from step 0 |
+| Upload and submit | 2 | `submitEssJobRequest` | `documentId` from call 1 |
+| Bulk import | 3 | `importBulkData` | the archive from step 0 |
+| Bulk import | 4 | `getEssJobStatus` | `reqstId` from call 3 |
+| Scheduler | 5 | `queryJobRequests` | — |
+| Scheduler | 6 | `submitJobRequest` | — |
+| Scheduler | 7 | `getJobRequest` | request id from call 6 |
+
+Step 0 belongs to no phase: it runs when either ERP phase is on, once for the two, and is skipped
+entirely when both are off — so a scheduler-only run needs no CSV files on disk.
 
 Every call prints its own line and the run continues regardless, so one operation being unavailable
 on the instance does not hide the rest. When a call cannot run because the response it depends on
-did not arrive, it says so rather than staying silent. Step 0 is the exception: nothing downstream
-can run without the archive, so a failure there ends the run.
+did not arrive, it says so rather than staying silent. Step 0 is the exception: the phases that
+follow it cannot run without the archive, so a failure there ends the run.
 
 ### Why step 0 passes `includeSourceDirectory: false`
 
@@ -97,25 +119,25 @@ rejects the attempt rather than producing a broken file.
 The entry names are printed after packing, because a missing or misnamed CSV is otherwise the
 failure that surfaces much later as an ESS job in `ERROR` with nothing wrong on the Ballerina side.
 
-Calls 3 and 4 cover the same ground as 1, 2 and the status read, in one operation instead of two —
-`importBulkData` is what Oracle recommends for FBDI imports, and both are called because instances
-differ in which they permit.
+The bulk-import phase covers the same ground as the upload-and-submit phase, in one operation
+instead of two — `importBulkData` is what Oracle recommends for FBDI imports. Both are on by default
+because instances differ in which they permit; once you know which one your instance takes, turn the
+other off.
 
 ## Example Log Output
 
 ```
 compress -> ./APInvoiceImport.zip (ApInvoicesInterface.csv, ApInvoiceLinesInterface.csv)
 
-=== ERP Integrations ===
+=== Upload and submit ===
 uploadFileToUcm -> {"operationName":"uploadFileToUCM", "documentId":"UCMFA00123456", ...}
 submitEssJobRequest -> {"operationName":"submitESSJobRequest", "reqstId":"301457", ...}
+
+=== Bulk import ===
 importBulkData -> {"operationName":"importBulkData", "documentId":"UCMFA00123457", "reqstId":"301458", ...}
 getEssJobStatus -> {"items":[{"reqstId":"301458", "requestStatus":"RUNNING", ...}], "count":1, ...}
 
-=== Scheduler ===
-queryJobRequests -> {"items":[{"requestId":301458, "state":"RUNNING", ...}], "count":25, ...}
-submitJobRequest -> {"id":301459, "links":[...]}
-getJobRequest -> {"requestId":301459, "state":"WAIT", "submitter":"INTEGRATION_USER", ...}
+=== Scheduler === skipped: enableSchedulerOperations is false
 ```
 
 A failure prints the message and the error detail, which is where Fusion puts the useful part:

@@ -14,11 +14,20 @@
 // specific language governing permissions and limitations
 // under the License.
 
-// One call to every operation both Oracle Fusion connectors expose, printing whatever comes back:
+// One call to every operation both Oracle Fusion connectors expose, printing whatever comes back,
+// in three phases that are enabled independently:
 //
-//   ballerinax/oraclefusion.erp.integrations  uploadFileToUcm, submitEssJobRequest,
-//                                             importBulkData, getEssJobStatus
-//   ballerinax/oraclefusion.common.scheduler  queryJobRequests, submitJobRequest, getJobRequest
+//   enableUploadOperations     uploadFileToUcm, submitEssJobRequest    (erp.integrations)
+//   enableImportOperations     importBulkData, getEssJobStatus         (erp.integrations)
+//   enableSchedulerOperations  queryJobRequests, submitJobRequest,
+//                              getJobRequest                           (common.scheduler)
+//
+// The phases are separate because each stands on its own: phases 1 and 2 cover the same ground two
+// different ways - staging the file and submitting a job over it, against the single call Oracle
+// recommends for FBDI imports - and phase 3 submits a scheduled process instead of loading data.
+// Which of them an instance permits, and which one is being investigated, differ from run to run.
+// Each phase also needs configuration the others do not, so turning one off drops its requirements
+// with it.
 //
 // Nothing is asserted and no call is retried. Each result is printed and the run continues, so one
 // operation being unavailable on the instance does not hide the rest.
@@ -26,104 +35,40 @@
 // The ids the later calls need come from the earlier responses, not from configuration: the
 // document `submitEssJobRequest` submits is the one `uploadFileToUcm` returned, the request
 // `getEssJobStatus` reads is the one `importBulkData` submitted, and the request `getJobRequest`
-// reads is the one `submitJobRequest` created.
+// reads is the one `submitJobRequest` created. That is why the pairs stay together in one phase.
 //
-// The archive the two uploads carry is built here as well, from the FBDI CSV files on disk, so the
-// run starts from what Oracle's FBDI template produces rather than from a zip made by hand.
+// This file holds only the gating. Each phase, and the `prepareArchive` step the two upload phases
+// share, is in `functions.bal`.
+//
+// The archive the two uploads carry is built by the run as well, from the FBDI CSV files on disk, so
+// the run starts from what Oracle's FBDI template produces rather than from a zip made by hand.
 
 import ballerina/io;
-import ballerina/zip;
-import ballerinax/oraclefusion.common.scheduler;
-import ballerinax/oraclefusion.erp.integrations;
 
 public function main() returns error? {
-    // 0. Pack the FBDI CSV files into the archive the uploads carry.
-    //
-    // `includeSourceDirectory: false` is what makes the archive loadable: Oracle matches each
-    // entry name against the interface table it feeds, so the CSV files have to sit at the root of
-    // the zip. Left at its default the source directory becomes a wrapping entry, every name gains
-    // a prefix, and the import fails on an instance that accepted the same data yesterday.
-    //
-    // `overwrite: true` because the sample is meant to be re-run. `zipFilePath` must be outside
-    // `dataDirPath` - the archive cannot contain itself, and `compress` rejects it if it would.
-    check zip:compress(dataDirPath, zipFilePath, {includeSourceDirectory: false, overwrite: true});
+    // The archive is only built when a phase carries it, so a scheduler-only run needs no CSV
+    // files on disk. Both upload phases send the same bytes, so it is built once for the two.
+    if enableUploadOperations || enableImportOperations {
+        string documentContent = check prepareArchive();
 
-    // Print what went in, since a missing or misnamed CSV is the failure that shows up much later
-    // as an ESS job in `ERROR` with nothing wrong on the Ballerina side.
-    zip:Entry[] entries = check zip:listEntries(zipFilePath);
-    string entryNames = string:'join(", ", ...from zip:Entry entry in entries
-                select entry.name);
+        if enableUploadOperations {
+            runUploadOperations(documentContent);
+        } else {
+            io:println("\n=== Upload and submit === skipped: enableUploadOperations is false");
+        }
 
-    io:println(string `compress -> ${zipFilePath} (${entryNames})`);
-
-    // The API expects the file as base64-encoded text, so read the archive and encode it.
-    byte[] fileBytes = check io:fileReadBytes(zipFilePath);
-    string documentContent = fileBytes.toBase64();
-
-    io:println("\n=== ERP Integrations ===");
-
-    // 1. Stage the file in WebCenter Content, without submitting a job.
-    integrations:ErpIntegrationResponse|error uploadResult = erpClient->uploadFileToUcm({
-        documentContent,
-        documentAccount,
-        contentType: "zip",
-        fileName
-    });
-    printOutcome("uploadFileToUcm", uploadResult);
-
-    // 2. Submit an ESS job over the document the upload returned.
-    string? documentId = uploadResult is integrations:ErpIntegrationResponse ? uploadResult?.documentId : ();
-    if documentId is string {
-        integrations:ErpIntegrationResponse|error essResult = erpClient->submitEssJobRequest({
-            jobPackageName,
-            jobDefName,
-            documentId,
-            essParameters
-        });
-        printOutcome("submitEssJobRequest", essResult);
+        if enableImportOperations {
+            runImportOperations(documentContent);
+        } else {
+            io:println("\n=== Bulk import === skipped: enableImportOperations is false");
+        }
     } else {
-        io:println("submitEssJobRequest -> skipped: uploadFileToUcm returned no documentId");
+        io:println("\n=== Upload and submit, bulk import === skipped: both phases are false");
     }
 
-    // 3. Upload and submit in a single call - the path Oracle recommends for FBDI imports.
-    integrations:ErpIntegrationResponse|error importResult = erpClient->importBulkData({
-        documentContent,
-        contentType: "zip",
-        fileName,
-        documentAccount,
-        jobName,
-        parameterList
-    });
-    printOutcome("importBulkData", importResult);
-
-    // 4. Read the status of the job the import submitted.
-    string? essRequestId = importResult is integrations:ErpIntegrationResponse ? importResult?.reqstId : ();
-    if essRequestId is string {
-        integrations:EssJobStatusResponse|error statusResult = erpClient->getEssJobStatus(essRequestId);
-        printOutcome("getEssJobStatus", statusResult);
+    if enableSchedulerOperations {
+        runSchedulerOperations();
     } else {
-        io:println("getEssJobStatus -> skipped: importBulkData returned no reqstId");
-    }
-
-    io:println("\n=== Scheduler ===");
-
-    // 5. List the scheduled process requests on the instance.
-    scheduler:RequestQueryResponse|error queryResult = schedulerClient->queryJobRequests();
-    printOutcome("queryJobRequests", queryResult);
-
-    // 6. Submit a scheduled process.
-    scheduler:SubmitRequestResponse|error submitResult = schedulerClient->submitJobRequest({
-        jobDefinitionId,
-        description: "Ballerina connector quickstart"
-    });
-    printOutcome("submitJobRequest", submitResult);
-
-    // 7. Read the request the submission created.
-    int? requestId = submitResult is scheduler:SubmitRequestResponse ? submitResult.id : ();
-    if requestId is int {
-        scheduler:RequestDetails|error detailsResult = schedulerClient->getJobRequest(requestId);
-        printOutcome("getJobRequest", detailsResult);
-    } else {
-        io:println("getJobRequest -> skipped: submitJobRequest returned no request id");
+        io:println("\n=== Scheduler === skipped: enableSchedulerOperations is false");
     }
 }
