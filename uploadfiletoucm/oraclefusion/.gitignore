@@ -1,9 +1,3 @@
-# macOS Finder metadata.
-.DS_Store
-
-# Editor settings.
-.vscode
-
 # Ballerina generates this directory during the compilation of a package.
 # It contains compiler-generated artifacts and the final executable if this is an application package.
 target/
@@ -16,12 +10,7 @@ generated/
 # See https://ballerina.io/learn/provide-values-to-configurable-variables/ for more details.
 Config.toml
 
-# Written by the automation at the end of every run.
-verification-report.md
-
-# `bal pack` leaves a jar behind when the connectors are built for the local repository.
-*.jar
-
-# The archive the run packs from the FBDI CSV files, and any FBDI data left in the working tree.
-*.zip
-fbdi-data/
+# File used to enable development-time tracing.
+# This should not be committed to version control.
+trace_enabled.bal
+config.toml
