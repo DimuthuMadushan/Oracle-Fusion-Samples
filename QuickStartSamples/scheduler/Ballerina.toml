@@ -1,0 +1,9 @@
+[package]
+org = "testoracle"
+name = "scheduler"
+version = "0.1.0"
+distribution = "2201.13.5"
+title = "Scheduler"
+
+[build-options]
+sticky = true
