@@ -1,9 +1,9 @@
 [package]
 org = "testoracle"
-name = "oraclefusion"
+name = "submitessjob"
 version = "0.1.0"
 distribution = "2201.13.5"
-title = "UploadFileToUcm"
+title = "SubmitEssJob"
 
 [build-options]
 sticky = true
